@@ -1,0 +1,13 @@
+name = "tg-bot-system"
+main = "src/index.js"
+compatibility_date = "2024-01-01"
+
+# D1 数据库绑定
+[[d1_databases]]
+binding = "DB"
+database_name = "tg-bot-db"
+database_id = "031ade0f-a5b4-421e-a7e8-fc0635129264"
+
+# 定时任务触发器 - 每分钟执行一次
+[triggers]
+crons = ["* * * * *"]

@@ -1,0 +1,17 @@
+{
+  "name": "tg-bot-system",
+  "version": "1.0.0",
+  "description": "TG 多机器人转发系统 - Cloudflare Workers + D1",
+  "main": "src/index.js",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "db:create": "wrangler d1 create tg-bot-db",
+    "db:init": "wrangler d1 execute tg-bot-db --file=./schema.sql",
+    "db:init:local": "wrangler d1 execute tg-bot-db --local --file=./schema.sql"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.0",
+    "wrangler": "^3.114.17"
+  }
+}
