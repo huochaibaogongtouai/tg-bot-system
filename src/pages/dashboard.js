@@ -55,6 +55,8 @@ a{color:var(--primary);text-decoration:none}
 .btn-sm{padding:6px 12px;font-size:12px}
 .btn-outline{background:transparent;color:var(--text2);border:1px solid var(--border)}
 .btn-outline:hover{border-color:var(--primary);color:var(--primary)}
+.btn-warning{background:rgba(255,167,38,0.15);color:var(--warning);border:1px solid rgba(255,167,38,0.2)}
+.btn-warning:hover{background:rgba(255,167,38,0.25)}
 
 /* Forms */
 .form-row{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px}
@@ -78,6 +80,9 @@ tr:hover td{background:rgba(255,255,255,0.02)}
 .badge-inactive{background:rgba(255,82,82,0.15);color:var(--danger)}
 .badge-exact{background:rgba(108,99,255,0.15);color:var(--primary)}
 .badge-fuzzy{background:rgba(255,167,38,0.15);color:var(--warning)}
+.badge-photo{background:rgba(33,150,243,0.15);color:#2196f3}
+.badge-video{background:rgba(156,39,176,0.15);color:#9c27b0}
+.badge-document{background:rgba(255,152,0,0.15);color:#ff9800}
 
 /* Modal */
 .modal-overlay{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.6);backdrop-filter:blur(4px);display:none;align-items:center;justify-content:center;z-index:1000}
@@ -100,7 +105,7 @@ tr:hover td{background:rgba(255,255,255,0.02)}
 .pagination span{color:var(--text2);font-size:13px}
 
 /* Tabs */
-.tabs{display:flex;gap:4px;margin-bottom:20px;border-bottom:1px solid var(--border);padding-bottom:0}
+.tabs{display:flex;gap:4px;margin-bottom:20px;border-bottom:1px solid var(--border);padding-bottom:0;flex-wrap:wrap}
 .tab{padding:10px 20px;cursor:pointer;font-size:14px;color:var(--text2);border-bottom:2px solid transparent;transition:all .2s;margin-bottom:-1px}
 .tab:hover{color:var(--text)}
 .tab.active{color:var(--primary);border-bottom-color:var(--primary);font-weight:600}
@@ -111,6 +116,11 @@ tr:hover td{background:rgba(255,255,255,0.02)}
 .empty{text-align:center;padding:48px 20px;color:var(--text2)}
 .empty .icon{font-size:48px;margin-bottom:12px}
 .empty p{font-size:14px}
+
+/* Command row */
+.cmd-row{display:flex;gap:8px;margin-bottom:8px;align-items:center}
+.cmd-row input{flex:1;padding:8px 12px;background:rgba(255,255,255,0.05);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px}
+.cmd-row button{padding:8px 12px;border-radius:6px;border:1px solid rgba(255,82,82,0.3);background:rgba(255,82,82,0.1);color:var(--danger);cursor:pointer;font-size:12px}
 
 /* Responsive */
 @media(max-width:768px){
@@ -133,6 +143,10 @@ tr:hover td{background:rgba(255,255,255,0.02)}
 
 /* Code */
 code{background:rgba(255,255,255,0.08);padding:2px 8px;border-radius:4px;font-size:12px;font-family:'SF Mono',Monaco,monospace}
+
+/* Info box */
+.info-box{background:rgba(108,99,255,0.08);border:1px solid rgba(108,99,255,0.2);border-radius:8px;padding:14px 16px;margin-bottom:16px;font-size:13px;color:var(--text2);line-height:1.6}
+.info-box strong{color:var(--text)}
 </style>
 </head>
 <body>
@@ -338,7 +352,6 @@ function enterBot(botId, name) {
 
   // Update sidebar
   const nav = document.getElementById('sidebarNav');
-  // Remove old bot nav items
   document.querySelectorAll('.bot-nav-item').forEach(el => el.remove());
 
   const section = document.createElement('div');
@@ -408,6 +421,8 @@ async function renderBotConfig() {
       <div class="tabs">
         <div class="tab active" onclick="switchTab(this,'tab-forward')">📡 转发规则</div>
         <div class="tab" onclick="switchTab(this,'tab-reply')">💬 自动回复</div>
+        <div class="tab" onclick="switchTab(this,'tab-customer')">🎧 客服设置</div>
+        <div class="tab" onclick="switchTab(this,'tab-menu')">📋 命令菜单</div>
         <div class="tab" onclick="switchTab(this,'tab-group')">👥 群管控</div>
         <div class="tab" onclick="switchTab(this,'tab-tasks')">⏰ 定时任务</div>
         <div class="tab" onclick="switchTab(this,'tab-logs')">📝 消息日志</div>
@@ -416,11 +431,16 @@ async function renderBotConfig() {
 
       <div id="tab-forward" class="tab-content active"></div>
       <div id="tab-reply" class="tab-content"></div>
+      <div id="tab-customer" class="tab-content"></div>
+      <div id="tab-menu" class="tab-content"></div>
       <div id="tab-group" class="tab-content"></div>
       <div id="tab-tasks" class="tab-content"></div>
       <div id="tab-logs" class="tab-content"></div>
       <div id="tab-events" class="tab-content"></div>
     \`;
+
+    // Store bot data for customer/menu tabs
+    window._currentBotData = botData;
 
     // Load first tab
     loadForwardRules();
@@ -435,10 +455,11 @@ function switchTab(el, tabId) {
   el.classList.add('active');
   document.getElementById(tabId).classList.add('active');
 
-  // Load tab content
   switch(tabId) {
     case 'tab-forward': loadForwardRules(); break;
     case 'tab-reply': loadAutoReplies(); break;
+    case 'tab-customer': loadCustomerSettings(); break;
+    case 'tab-menu': loadMenuSettings(); break;
     case 'tab-group': loadGroupConfigs(); break;
     case 'tab-tasks': loadTasks(); break;
     case 'tab-logs': loadLogs(1); break;
@@ -623,6 +644,161 @@ async function deleteReply(id) {
   } catch(e) { toast(e.message, 'error'); }
 }
 
+// ===== Customer Service Settings (首次客户自动回复 + /start /help 自定义) =====
+async function loadCustomerSettings() {
+  const container = document.getElementById('tab-customer');
+  try {
+    const botData = window._currentBotData || await api('/api/bots/' + currentBotId);
+
+    container.innerHTML = \`
+      <div class="card">
+        <div class="card-header"><h3>🎧 客服自动回复设置</h3></div>
+        <div class="info-box">
+          <strong>功能说明：</strong><br>
+          1. <strong>首次联系自动回复</strong>：用户首次私聊机器人时，自动发送一条欢迎/引导消息（仅首次触发）<br>
+          2. <strong>/start 回复</strong>：用户发送 /start 指令时的自定义回复内容<br>
+          3. <strong>/help 回复</strong>：用户发送 /help 指令时的自定义帮助内容<br>
+          4. <strong>多媒体支持</strong>：管理员回复客户消息时，支持发送图片、视频、文件、语音、贴纸等所有消息类型<br>
+          支持变量：<code>{name}</code> 用户姓名、<code>{username}</code> 用户名
+        </div>
+
+        <div class="form-group">
+          <label>📩 首次联系自动回复</label>
+          <textarea id="firstContactReply" rows="4" placeholder="用户首次私聊机器人时自动发送的消息，留空则不发送">\${esc(botData.first_contact_reply || '')}</textarea>
+          <div class="form-hint">仅在用户首次联系时触发一次，支持 HTML 格式和变量替换</div>
+        </div>
+
+        <div class="form-group">
+          <label>👋 /start 指令回复</label>
+          <textarea id="startReply" rows="3" placeholder="自定义 /start 指令的回复内容，留空使用默认">\${esc(botData.start_reply || '')}</textarea>
+          <div class="form-hint">留空将使用默认欢迎语</div>
+        </div>
+
+        <div class="form-group">
+          <label>📖 /help 指令回复</label>
+          <textarea id="helpReply" rows="3" placeholder="自定义 /help 指令的回复内容，留空使用默认">\${esc(botData.help_reply || '')}</textarea>
+          <div class="form-hint">留空将使用默认帮助信息</div>
+        </div>
+
+        <button class="btn btn-primary" onclick="saveCustomerSettings()">保存客服设置</button>
+      </div>
+
+      <div class="card">
+        <div class="card-header"><h3>💡 客服回复使用说明</h3></div>
+        <div style="color:var(--text2);font-size:14px;line-height:2">
+          <p>1. 在「基本配置」中设置<strong>管理员 Chat ID</strong></p>
+          <p>2. 用户私聊机器人发送的所有消息（文字、图片、视频、文件等）都会自动转发给管理员</p>
+          <p>3. 管理员直接<strong>回复</strong>转发的消息，机器人会自动将回复内容发送给对应用户</p>
+          <p>4. 管理员回复时支持发送<strong>文字、图片、视频、文件、语音、贴纸、GIF</strong>等所有消息类型</p>
+          <p>5. 获取管理员 Chat ID：向机器人发送 <code>/id</code> 指令即可获取</p>
+        </div>
+      </div>
+    \`;
+  } catch(e) {
+    container.innerHTML = '<div class="card"><p>加载失败: ' + e.message + '</p></div>';
+  }
+}
+
+async function saveCustomerSettings() {
+  try {
+    await api('/api/bots/' + currentBotId, 'PUT', {
+      first_contact_reply: document.getElementById('firstContactReply').value,
+      start_reply: document.getElementById('startReply').value,
+      help_reply: document.getElementById('helpReply').value,
+    });
+    // Update cached data
+    if (window._currentBotData) {
+      window._currentBotData.first_contact_reply = document.getElementById('firstContactReply').value;
+      window._currentBotData.start_reply = document.getElementById('startReply').value;
+      window._currentBotData.help_reply = document.getElementById('helpReply').value;
+    }
+    toast('客服设置已保存');
+  } catch(e) {
+    toast(e.message, 'error');
+  }
+}
+
+// ===== Bot Menu Commands =====
+let menuCommands = [];
+
+async function loadMenuSettings() {
+  const container = document.getElementById('tab-menu');
+  try {
+    // Load saved commands
+    const botData = window._currentBotData || await api('/api/bots/' + currentBotId);
+    
+    // Default commands
+    menuCommands = [
+      { command: 'start', description: '开始使用 / 启动机器人' },
+      { command: 'help', description: '帮助信息 / 功能说明' },
+      { command: 'id', description: '获取当前会话ID' },
+    ];
+
+    container.innerHTML = \`
+      <div class="card">
+        <div class="card-header"><h3>📋 机器人命令菜单</h3></div>
+        <div class="info-box">
+          <strong>功能说明：</strong>设置机器人在 Telegram 对话框中显示的命令菜单（点击输入框左侧 "/" 按钮可查看）。<br>
+          修改后将实时同步到 Telegram，用户可以直接点击菜单中的命令使用。
+        </div>
+
+        <div id="commandsList"></div>
+
+        <div style="margin-top:12px;display:flex;gap:8px">
+          <button class="btn btn-outline" onclick="addCommandRow()">+ 添加命令</button>
+          <button class="btn btn-primary" onclick="saveMenuCommands()">保存并同步到 Telegram</button>
+        </div>
+      </div>
+    \`;
+
+    renderCommandRows();
+  } catch(e) {
+    container.innerHTML = '<div class="card"><p>加载失败: ' + e.message + '</p></div>';
+  }
+}
+
+function renderCommandRows() {
+  const list = document.getElementById('commandsList');
+  if (!list) return;
+  list.innerHTML = menuCommands.map((cmd, i) => \`
+    <div class="cmd-row">
+      <input type="text" placeholder="命令（不含/）" value="\${esc(cmd.command)}" onchange="menuCommands[\${i}].command=this.value.replace('/','')">
+      <input type="text" placeholder="命令描述" value="\${esc(cmd.description)}" onchange="menuCommands[\${i}].description=this.value">
+      <button onclick="removeCommandRow(\${i})">✕</button>
+    </div>
+  \`).join('');
+}
+
+function addCommandRow() {
+  menuCommands.push({ command: '', description: '' });
+  renderCommandRows();
+}
+
+function removeCommandRow(index) {
+  menuCommands.splice(index, 1);
+  renderCommandRows();
+}
+
+async function saveMenuCommands() {
+  const validCommands = menuCommands.filter(c => c.command.trim() && c.description.trim());
+  if (validCommands.length === 0) {
+    toast('请至少添加一条命令', 'error');
+    return;
+  }
+
+  try {
+    await api('/api/bots/' + currentBotId + '/commands', 'PUT', {
+      commands: validCommands.map(c => ({
+        command: c.command.trim().toLowerCase().replace(/^\//, ''),
+        description: c.description.trim(),
+      })),
+    });
+    toast('命令菜单已同步到 Telegram');
+  } catch(e) {
+    toast(e.message, 'error');
+  }
+}
+
 // ===== Group Configs =====
 async function loadGroupConfigs() {
   const container = document.getElementById('tab-group');
@@ -683,7 +859,6 @@ async function addGroupConfig() {
 }
 
 async function editGroupConfig(id) {
-  // Fetch current config data from the table (simplified - refetch all)
   const data = await api('/api/bots/' + currentBotId + '/group-configs');
   const config = (data.configs || []).find(c => c.id === id);
   if (!config) return;
@@ -790,7 +965,6 @@ function showAddTaskModal() {
     </div>
   \`);
 
-  // Set default time to now + 5 minutes
   const now = new Date(Date.now() + 5 * 60000);
   document.getElementById('taskNextRun').value = now.toISOString().slice(0, 16);
 }
@@ -840,8 +1014,8 @@ async function loadLogs(page) {
           </div>
         </div>
         \${logs.length === 0 ? '<div class="empty"><div class="icon">📝</div><p>暂无消息日志</p></div>' :
-        '<div class="table-wrap"><table><thead><tr><th>时间</th><th>类型</th><th>用户</th><th>内容</th></tr></thead><tbody>' +
-        logs.map(l => '<tr><td style="white-space:nowrap">' + formatDate(l.created_at) + '</td><td>' + esc(l.chat_type || '') + '</td><td>' + (l.first_name ? esc(l.first_name) : '') + (l.username ? ' @' + esc(l.username) : '') + '</td><td>' + esc(l.message_text || '').substring(0,80) + '</td></tr>').join('') +
+        '<div class="table-wrap"><table><thead><tr><th>时间</th><th>消息类型</th><th>会话类型</th><th>用户</th><th>内容</th></tr></thead><tbody>' +
+        logs.map(l => '<tr><td style="white-space:nowrap">' + formatDate(l.created_at) + '</td><td>' + getMsgTypeBadge(l.message_type) + '</td><td>' + esc(l.chat_type || '') + '</td><td>' + (l.first_name ? esc(l.first_name) : '') + (l.username ? ' @' + esc(l.username) : '') + '</td><td>' + esc(l.message_text || '').substring(0,80) + '</td></tr>').join('') +
         '</tbody></table></div>'}
         <div class="pagination">
           \${page > 1 ? '<button onclick="loadLogs(' + (page-1) + ')">上一页</button>' : ''}
@@ -853,6 +1027,21 @@ async function loadLogs(page) {
   } catch(e) {
     container.innerHTML = '<div class="card"><p>加载失败: ' + e.message + '</p></div>';
   }
+}
+
+function getMsgTypeBadge(type) {
+  const map = {
+    'text': ['文字', 'active'],
+    'photo': ['图片', 'photo'],
+    'video': ['视频', 'video'],
+    'document': ['文件', 'document'],
+    'audio': ['音频', 'fuzzy'],
+    'voice': ['语音', 'fuzzy'],
+    'sticker': ['贴纸', 'exact'],
+    'animation': ['GIF', 'exact'],
+  };
+  const m = map[type] || [type || '未知', 'inactive'];
+  return '<span class="badge badge-' + m[1] + '">' + m[0] + '</span>';
 }
 
 async function exportLogs() {
@@ -964,8 +1153,9 @@ async function renderSettings() {
       <p style="color:var(--text2);font-size:14px;line-height:1.8">
         运行环境：Cloudflare Workers<br>
         数据库：Cloudflare D1 (SQLite)<br>
-        版本：1.0.0<br>
-        架构：多机器人集群管理
+        版本：1.1.0<br>
+        架构：多机器人集群管理<br>
+        更新：支持多媒体客服回复、首次联系自动回复、命令菜单管理
       </p>
     </div>
   \`;

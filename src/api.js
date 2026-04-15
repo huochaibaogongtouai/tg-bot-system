@@ -3,7 +3,7 @@
 // ============================================
 
 import { getConfig, setConfig, generateId } from './db.js';
-import { setWebhook, deleteWebhook, getMe } from './telegram.js';
+import { setWebhook, deleteWebhook, getMe, setMyCommands } from './telegram.js';
 
 function jsonResponse(data, status = 200) {
   return new Response(JSON.stringify(data), {
@@ -84,6 +84,13 @@ export async function handleApi(db, request, url) {
         await db.prepare("UPDATE bots SET webhook_url = ? WHERE bot_id = ?").bind(webhookUrl, botId).run();
       }
 
+      // 设置默认机器人命令菜单
+      await setMyCommands(body.token, [
+        { command: 'start', description: '开始使用 / 启动机器人' },
+        { command: 'help', description: '帮助信息 / 功能说明' },
+        { command: 'id', description: '获取当前会话ID' },
+      ]);
+
       return jsonResponse({
         success: true,
         bot_id: botId,
@@ -101,7 +108,18 @@ export async function handleApi(db, request, url) {
       if (method === 'GET') {
         const bot = await db.prepare("SELECT * FROM bots WHERE bot_id = ?").bind(botId).first();
         if (!bot) return jsonResponse({ error: '机器人不存在' }, 404);
-        return jsonResponse({ bot });
+        
+        // 获取机器人的自定义配置
+        const firstContactReply = await getConfig(db, `bot_${botId}_first_contact_reply`) || '';
+        const startReply = await getConfig(db, `bot_${botId}_start_reply`) || '';
+        const helpReply = await getConfig(db, `bot_${botId}_help_reply`) || '';
+        
+        return jsonResponse({ 
+          bot,
+          first_contact_reply: firstContactReply,
+          start_reply: startReply,
+          help_reply: helpReply,
+        });
       }
 
       if (method === 'PUT') {
@@ -118,6 +136,34 @@ export async function handleApi(db, request, url) {
           params.push(botId);
           await db.prepare(`UPDATE bots SET ${updates.join(', ')} WHERE bot_id = ?`).bind(...params).run();
         }
+
+        // 保存自定义配置
+        if (body.first_contact_reply !== undefined) {
+          await setConfig(db, `bot_${botId}_first_contact_reply`, body.first_contact_reply);
+        }
+        if (body.start_reply !== undefined) {
+          await setConfig(db, `bot_${botId}_start_reply`, body.start_reply);
+        }
+        if (body.help_reply !== undefined) {
+          await setConfig(db, `bot_${botId}_help_reply`, body.help_reply);
+        }
+
+        // 更新机器人命令菜单
+        if (body.bot_commands !== undefined) {
+          const bot = await db.prepare("SELECT token FROM bots WHERE bot_id = ?").bind(botId).first();
+          if (bot) {
+            try {
+              const commands = JSON.parse(body.bot_commands);
+              if (Array.isArray(commands) && commands.length > 0) {
+                await setMyCommands(bot.token, commands);
+                await setConfig(db, `bot_${botId}_commands`, body.bot_commands);
+              }
+            } catch (e) {
+              // 忽略 JSON 解析错误
+            }
+          }
+        }
+
         return jsonResponse({ success: true });
       }
 
@@ -134,9 +180,29 @@ export async function handleApi(db, request, url) {
           await db.prepare("DELETE FROM scheduled_tasks WHERE bot_id = ?").bind(botId).run();
           await db.prepare("DELETE FROM customer_messages WHERE bot_id = ?").bind(botId).run();
           await db.prepare("DELETE FROM forward_queue WHERE bot_id = ?").bind(botId).run();
+          // 清理自定义配置
+          await db.prepare("DELETE FROM system_config WHERE key LIKE ?").bind(`bot_${botId}_%`).run();
           await db.prepare("DELETE FROM bots WHERE bot_id = ?").bind(botId).run();
         }
         return jsonResponse({ success: true });
+      }
+    }
+
+    // ===== 机器人命令菜单更新 =====
+    const botCommandsMatch = path.match(/^\/api\/bots\/([^/]+)\/commands$/);
+    if (botCommandsMatch && method === 'PUT') {
+      const botId = botCommandsMatch[1];
+      const body = await request.json();
+      const bot = await db.prepare("SELECT token FROM bots WHERE bot_id = ?").bind(botId).first();
+      if (!bot) return jsonResponse({ error: '机器人不存在' }, 404);
+
+      const commands = body.commands || [];
+      const result = await setMyCommands(bot.token, commands);
+      if (result.ok) {
+        await setConfig(db, `bot_${botId}_commands`, JSON.stringify(commands));
+        return jsonResponse({ success: true, message: '命令菜单已更新' });
+      } else {
+        return jsonResponse({ error: '更新命令菜单失败: ' + (result.description || '') }, 400);
       }
     }
 

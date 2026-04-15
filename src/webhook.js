@@ -2,7 +2,8 @@
 // TG Webhook 处理模块
 // ============================================
 
-import { sendMessage, forwardMessage, copyMessage, deleteMessage } from './telegram.js';
+import { sendMessage, forwardMessage, copyMessage, deleteMessage, sendMediaMessage } from './telegram.js';
+import { getConfig } from './db.js';
 
 // 获取消息文本内容（兼容各种消息类型）
 function getMessageText(message) {
@@ -22,6 +23,7 @@ function getMessageType(message) {
   if (message.poll) return 'poll';
   if (message.location) return 'location';
   if (message.contact) return 'contact';
+  if (message.video_note) return 'video_note';
   return 'other';
 }
 
@@ -54,7 +56,7 @@ export async function handleWebhook(db, botRecord, update) {
       // 记录消息日志
       await logMessage(db, bot_id, message);
 
-      // 检查是否是管理员回复（客服功能）
+      // 检查是否是管理员回复（客服功能）- 支持所有消息类型
       if (admin_chat_id && message.reply_to_message && String(message.chat.id) === String(admin_chat_id)) {
         await handleAdminReply(db, bot_id, token, message);
         return;
@@ -69,14 +71,25 @@ export async function handleWebhook(db, botRecord, update) {
       // 处理指令
       if (message.text && message.text.startsWith('/')) {
         await handleCommand(db, bot_id, token, message);
+        // /start 指令后也检查首次客户自动回复
+        if (message.text.startsWith('/start') && message.chat.type === 'private') {
+          await handleFirstContactReply(db, bot_id, token, message);
+        }
+        // 私聊消息转发给管理员（包括指令消息也转发，让管理员知道有新用户）
+        if (message.chat.type === 'private' && admin_chat_id && String(message.from.id) !== String(admin_chat_id)) {
+          await forwardToAdmin(db, bot_id, token, message, admin_chat_id);
+        }
         return;
       }
 
       // 自动回复
       await handleAutoReply(db, bot_id, token, message);
 
-      // 私聊消息转发给管理员（客服功能）
+      // 私聊消息转发给管理员（客服功能）- 支持所有消息类型
       if (message.chat.type === 'private' && admin_chat_id && String(message.from.id) !== String(admin_chat_id)) {
+        // 首次联系自动回复
+        await handleFirstContactReply(db, bot_id, token, message);
+        // 转发给管理员
         await forwardToAdmin(db, bot_id, token, message, admin_chat_id);
       }
     }
@@ -213,17 +226,27 @@ async function handleCommand(db, botId, token, message) {
 
   switch (command) {
     case '/start':
-      await sendMessage(token, chatId, '👋 欢迎使用本机器人！\n\n发送任意消息即可与管理员沟通。');
+      // 获取自定义 start 回复
+      const startReply = await getConfig(db, `bot_${botId}_start_reply`);
+      if (startReply) {
+        await sendMessage(token, chatId, startReply);
+      } else {
+        await sendMessage(token, chatId, '👋 欢迎使用本机器人！\n\n发送任意消息即可与管理员沟通。');
+      }
       break;
 
     case '/help':
-      await sendMessage(token, chatId,
-        '📖 <b>可用指令</b>\n\n' +
-        '/start - 开始使用\n' +
-        '/help - 帮助信息\n' +
-        '/remind [分钟] [内容] - 设置提醒\n' +
-        '/id - 获取当前会话ID'
-      );
+      const helpReply = await getConfig(db, `bot_${botId}_help_reply`);
+      if (helpReply) {
+        await sendMessage(token, chatId, helpReply);
+      } else {
+        await sendMessage(token, chatId,
+          '📖 <b>可用指令</b>\n\n' +
+          '/start - 开始使用\n' +
+          '/help - 帮助信息\n' +
+          '/id - 获取当前会话ID'
+        );
+      }
       break;
 
     case '/id':
@@ -303,7 +326,31 @@ async function handleAutoReply(db, botId, token, message) {
   }
 }
 
-// 转发私聊消息给管理员
+// 首次联系自动回复
+async function handleFirstContactReply(db, botId, token, message) {
+  const userId = String(message.from.id);
+  const chatId = String(message.chat.id);
+
+  // 获取首次联系自动回复内容
+  const firstContactReply = await getConfig(db, `bot_${botId}_first_contact_reply`);
+  if (!firstContactReply) return;
+
+  // 检查是否是首次联系（查看 customer_messages 表中是否有该用户的记录）
+  const existing = await db.prepare(
+    "SELECT id FROM customer_messages WHERE bot_id = ? AND original_user_id = ? LIMIT 1"
+  ).bind(botId, userId).first();
+
+  if (!existing) {
+    // 首次联系，发送自动回复
+    const userName = message.from.first_name || message.from.username || '用户';
+    const replyText = firstContactReply
+      .replace(/{name}/g, userName)
+      .replace(/{username}/g, message.from.username ? `@${message.from.username}` : '');
+    await sendMessage(token, chatId, replyText);
+  }
+}
+
+// 转发私聊消息给管理员（支持所有消息类型：文字、图片、视频、文件等）
 async function forwardToAdmin(db, botId, token, message, adminChatId) {
   const result = await forwardMessage(token, adminChatId, message.chat.id, message.message_id);
 
@@ -315,7 +362,7 @@ async function forwardToAdmin(db, botId, token, message, adminChatId) {
   }
 }
 
-// 管理员回复处理
+// 管理员回复处理 - 支持所有消息类型（文字、图片、视频、文件、语音、贴纸等）
 async function handleAdminReply(db, botId, token, message) {
   const replyTo = message.reply_to_message;
   if (!replyTo) return;
@@ -326,7 +373,12 @@ async function handleAdminReply(db, botId, token, message) {
   ).bind(botId, String(replyTo.message_id)).first();
 
   if (mapping) {
-    // 发送回复给原始用户
-    await sendMessage(token, mapping.original_user_id, message.text || '');
+    // 发送回复给原始用户 - 支持所有消息类型
+    const result = await sendMediaMessage(token, mapping.original_user_id, message);
+    
+    // 如果 sendMediaMessage 返回 null（不支持的类型），尝试 copyMessage
+    if (!result) {
+      await copyMessage(token, mapping.original_user_id, message.chat.id, message.message_id);
+    }
   }
 }
