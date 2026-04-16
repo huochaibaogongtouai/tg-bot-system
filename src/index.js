@@ -27,7 +27,7 @@ export default {
     const path = url.pathname;
     const method = request.method;
 
-    // 初始化数据库（幂等操作）
+    // 初始化数据库（幂等操作，使用内存缓存避免重复执行）
     await initDatabase(db);
 
     // ===== Webhook 接口（无需登录） =====
@@ -35,7 +35,6 @@ export default {
     if (webhookMatch && method === 'POST') {
       const botId = webhookMatch[1];
       try {
-        // 查找机器人
         const bot = await db.prepare(
           "SELECT * FROM bots WHERE bot_id = ? AND status = 'active'"
         ).bind(botId).first();
@@ -48,7 +47,6 @@ export default {
         }
 
         const update = await request.json();
-        // 异步处理 webhook，立即返回 200
         ctx.waitUntil(handleWebhook(db, bot, update));
 
         return new Response('OK', { status: 200 });
@@ -75,8 +73,17 @@ export default {
     // ===== 登录提交 =====
     if (path === '/login' && method === 'POST') {
       try {
-        const formData = await request.formData();
-        const password = formData.get('password');
+        let password = '';
+        const contentType = request.headers.get('Content-Type') || '';
+
+        if (contentType.includes('application/json')) {
+          const body = await request.json();
+          password = body.password || '';
+        } else {
+          // Handle both multipart/form-data and application/x-www-form-urlencoded
+          const formData = await request.formData();
+          password = formData.get('password') || '';
+        }
 
         const valid = await verifyPassword(db, password);
         if (!valid) {
@@ -86,14 +93,16 @@ export default {
         }
 
         const sessionId = await createSession(db);
+        const headers = new Headers();
+        headers.set('Location', '/');
+        headers.set('Set-Cookie', setSessionCookie(sessionId));
+        // Also set cookie without HttpOnly for redirect compatibility
         return new Response(null, {
           status: 302,
-          headers: {
-            'Location': '/',
-            'Set-Cookie': setSessionCookie(sessionId),
-          },
+          headers,
         });
       } catch (error) {
+        console.error('[Login Error]', error.message);
         return new Response(loginPage('登录失败: ' + error.message), {
           headers: { 'Content-Type': 'text/html; charset=utf-8' },
         });
@@ -103,7 +112,9 @@ export default {
     // ===== 退出登录 =====
     if (path === '/logout') {
       const sessionId = getSessionFromCookie(request);
-      await destroySession(db, sessionId);
+      if (sessionId) {
+        await destroySession(db, sessionId);
+      }
       return new Response(null, {
         status: 302,
         headers: {

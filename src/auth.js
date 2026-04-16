@@ -39,11 +39,11 @@ export function getSessionFromCookie(request) {
 }
 
 export function setSessionCookie(sessionId) {
-  return `session_id=${sessionId}; Path=/; HttpOnly; SameSite=Strict; Max-Age=86400`;
+  return `session_id=${sessionId}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=86400`;
 }
 
 export function clearSessionCookie() {
-  return 'session_id=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0';
+  return 'session_id=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0';
 }
 
 export async function verifyPassword(db, password) {
